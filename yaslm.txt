@@ -1,0 +1,39 @@
+module: binding+
+
+binding: NAME varargslist '=' suite
+
+compound_expr: while_stmt | for_stmt | (test (';' test)* [';'] NEWLINE )
+suite: compound_expr | NEWLINE INDENT (binding)* (compound_expr)+ DEDENT
+ 
+lambdef: '\' varargslist '->' suite
+while_stmt: 'while' test 'do' suite
+test: 'if' test 'then' suite ['else' suite] | lambdef
+or_test: and_test ('or' and_test)*
+and_test: not_test ('and' not_test)*
+not_test: 'not' not_test | comparison
+comparison: btw_or_expr (comp_op btw_or_expr)*
+comp_op: '<'|'>'|'=='|'>='|'<='|'<>'|'!='|'in'|'not' 'in'|'is'|'is' 'not'
+btw_or_expr: xor_expr ('|' xor_expr)*
+xor_expr: and_expr ('^' and_expr)*
+and_expr: shift_expr ('&' shift_expr)*
+shift_expr: arith_expr (('<<'|'>>') arith_expr)*
+arith_expr: term (('+'|'-') term)*
+term: factor (('*'|'/'|'%'|'//') factor)*
+factor: ('+'|'-'|'~') factor | power
+power: atom trailer* ['**' factor]
+atom: ('(' [yield_expr|testlist_comp] ')' |
+       '[' [listmaker] ']' |
+       '{' [dictorsetmaker] '}' |
+       '`' testlist1 '`' |
+       NAME | NUMBER | STRING+)
+listmaker: test ( list_for | (',' test)* [','] )
+testlist_comp: test ( comp_for | (',' test)* [','] )
+lambdef: 'lambda' [varargslist] ':' test
+trailer: '(' [arglist] ')' | '[' subscriptlist ']' | '.' NAME
+subscriptlist: subscript (',' subscript)* [',']
+subscript: '.' '.' '.' | test | [test] ':' [test] [sliceop]
+sliceop: ':' [test]
+exprlist: expr (',' expr)* [',']
+testlist: test (',' test)* [',']
+dictorsetmaker: ( (test ':' test (comp_for | (',' test ':' test)* [','])) |
+                  (test (comp_for | (',' test)* [','])) )
