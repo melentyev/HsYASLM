@@ -28,6 +28,7 @@ data LexemType = Indent
            | ParenthesisClose
            | BracketOpen
            | BracketClose
+           | End
             deriving (Eq, Show) 
 
 lxName (LxName s) = s
@@ -79,7 +80,10 @@ addLexem t st0 =
     where l = Lexem t (lsSrcLine st0) (lsLinePos st0) 
 
 nextLine :: LexerState ()
-nextLine = modify (\st -> st { lsLinePos = 0, lsSrcLine = lsSrcLine st + 1 } )
+nextLine = do
+    st <- get
+    if ( (lxType $ head $ lsResult st) /= Newline) then addLexem Newline st else return ()
+    modify (\st -> st { lsLinePos = 0, lsSrcLine = lsSrcLine st + 1 } )
 
 manyC :: (Char -> Bool) -> LexerState String
 manyC f = do
@@ -89,7 +93,7 @@ manyC f = do
     return pref
 
 isKnownSymbol :: Char -> Bool
-isKnownSymbol = flip elem "<>=+-*/%$^|&!./|\\"
+isKnownSymbol = flip elem "<>=+-*/%$^|&!./|\\:"
 
 isNameSymbol :: Char -> Bool 
 isNameSymbol = liftA2 (||) isAlphaNum (=='_')
@@ -113,7 +117,6 @@ parseLineRest = do
              c | c == '\n' -> do 
                     move 1
                     nextLine
-                    addLexem Newline st
                | c == ' ' -> move 1
                | c == '(' -> do { move 1; addLexem ParenthesisOpen st }
                | c == ')' -> do { move 1; addLexem ParenthesisClose st }
@@ -144,12 +147,12 @@ parse :: LexerState ()
 parse = do
     st <- get 
     case lsInput st of
-        [] -> do { nextLine; dedentTo 0 }
+        [] -> do { nextLine; dedentTo 0; addLexem End st }
         _ -> parseLine >> parse
 
 
 runLexer :: String -> [Lexem]
 runLexer s = 
     reverse $ lsResult $ snd $ fromJust $ res
-    where res = runStateT (nextLine >> parse) $ LexerStateData [] s 0 0 [] [0]
+    where res = runStateT parse $ LexerStateData [] s 0 0 [] [0]
     

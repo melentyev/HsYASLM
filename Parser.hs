@@ -1,4 +1,4 @@
-module Parser (AST(..), runParser) where
+module Parser (AST(..), runParser, CompOp, keywords) where
 
 {-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-name-shadowing 
     -fwarn-monomorphism-restriction -fwarn-hi-shadowing
@@ -14,9 +14,11 @@ import System.IO
 import Control.Monad
 import Control.Monad.Loops
 import Control.Applicative ( (<*>), (<$>) )
-
+import qualified Text.Show.Pretty as Pr
 
 data CompOp = Eq | NotEq | LessEq | GrEq | Less | Gr deriving (Show)
+
+keywords = ["if", "then", "else", "while", "do", "for", "in"]
 
 data AST = Module [AST]
            | Binding AST
@@ -31,6 +33,7 @@ data AST = Module [AST]
            | IfExpr AST AST (Maybe AST)
            | Test AST
            | Testlist [AST]
+           | Cons AST AST
            | OrTest [AST]
            | AndTest [AST]
            | NotTest AST
@@ -73,18 +76,21 @@ consume n = modify (\st -> st { psInput = drop n (psInput st) } )
 
 matchNextLexem :: (LexemType -> Bool) -> ParserState LexemType
 matchNextLexem fpred = do
+    st <- get
+    if (length $ psInput st) < 1 then error "matchNextLexem list finished unexpected" else return ()
     lx <- gets $ lxType . head . psInput
     if fpred $ lx then do { consume 1; return lx } else mzero
 
 manyOrNone :: ParserState a -> ParserState [a]
 manyOrNone parser =
     let manyOrNone' acc = (do { pres <- parser; manyOrNone' (pres : acc) }) <|> return acc
-    in manyOrNone' []    
+    in reverse <$> manyOrNone' []    
 
 many :: ParserState a -> ParserState [a]
-many parser = do
+many parser = (:) <$> parser <*> manyOrNone parser
+{- many parser = do
     pres <- parser
-    ((:) pres) `liftM` (manyOrNone parser)
+    ((:) pres) `liftM` (manyOrNone parser) -}
 
 separatedBy parser separator = do
     head <- parser
@@ -92,6 +98,7 @@ separatedBy parser separator = do
     return $ head : tail
 
 wrappedBy parser (beg, end) = beg >> parser >>= (\r -> end >> return r)
+followedBy parser by = parser >>= (\r -> by >> return r)
     
 oneOrNone :: ParserState a -> ParserState (Maybe a)
 oneOrNone parser = do
@@ -106,43 +113,44 @@ parse acc = Module `liftM` manyOrNone binding
     --    else return $ Module acc
 
 
-binding = tupleBinding <|> funcBinding
+binding = (newline >> binding) <|> tupleBinding <|> funcBinding
 tupleBinding = do
     ids <- name `separatedBy` comma
-    singleEq
+    operator "="
     cont <- suite
     return $ TupleBinding (ids) cont
 
-funcBinding = name >> varargslist >> singleEq >> suite
+--funcBinding = name >> varargslist >> operator "=" >> suite
+funcBinding = FuncBinding <$> name <*> (varargslist `followedBy` operator "=") <*> suite
 suite = indentedSuite <|> compoundExpr
-indentedSuite = do
-    newline >> indent 
-    b <- binding
-    e <- compoundExpr
-    dedent
-    return $ IndentedSuite [b] [e]
+indentedSuite = IndentedSuite <$> (newline >> indent >> manyOrNone binding)
+                              <*> (many compoundExpr `followedBy` dedent)
 
-compoundExpr = whileStmt <|> forStmt <|> compoundExprStmt
+compoundExpr = (newline >> compoundExpr) <|> whileStmt <|> forStmt <|> compoundExprStmt
 whileStmt = keyword "while" >> test >> keyword "do" >> suite
 forStmt = keyword "for" >> testlist >> keyword "in" >> testlist >> keyword "do" >> suite
-compoundExprStmt = exprStmt
-exprStmt = do 
-    tl <- testlist 
-    val <- oneOrNone (arrowLeft >> exprStmt)
-    return $ ExprStmt tl val
-
+compoundExprStmt =  CompoundExprStmt 
+                <$> exprStmt `separatedBy` semicolon 
+                `followedBy` oneOrNone semicolon 
+                `followedBy` newline
+exprStmt = ExprStmt <$> testlist  <*> oneOrNone (arrowLeft >> exprStmt)
 testlist = Testlist <$> (test `separatedBy` comma)
 
-test = lambdef <|> ifExpr <|> orTest
-lambdef = backslash >> varargslist >> arrowRight >> suite
+test = lambdef <|> ifExpr <|> cons
+lambdef = Lambdef <$> (backslash >> varargslist `followedBy` arrowRight) <*> suite
 ifExpr = do 
-    keyword "if" 
+    keyword "if"
+
+
     cond <- test
+
     keyword "then"
-    th <- suite
+    th <- exprStmt <|> suite 
     keyword "else"
-    el <- oneOrNone suite
+
+    el <- oneOrNone (exprStmt <|> suite)
     return $ IfExpr cond th el
+cons = (\l r -> maybe l (Cons l) r ) <$> orTest <*> oneOrNone (operator "::" >> cons) 
 
 orTest      = binaryOp andTest (keyword "or") OrTest
 andTest     = binaryOp notTest (keyword "and") AndTest
@@ -168,27 +176,30 @@ power = Power <$> atom <*> manyOrNone trailer <*> oneOrNone (operator "**" >> fa
     pow <- oneOrNone (operator "**" >> factor)
     --error "here"
     return $ Power a tr pow --}
-trailer = Scope <$> (operator "." >> name) <|> callarg
+trailer = (Scope <$> (operator "." >> name) ) <|> callarg
 callarg = Callarg <$> atom
 atom    =  testlist `wrappedBy` (parenthesisOpen, parenthesisClose) 
        <|> name 
        <|> constInt 
-       <|> string
+       -- <|> string
 
 
-varargslist = many arg
+varargslist = Varargslist <$> many arg
 arg = (Arg <$> (name `separatedBy` comma) ) <|> parentedArg
 parentedArg = arg `wrappedBy` (parenthesisOpen, parenthesisClose)
 
-string = (Name . lxName) <$> matchNextLexem (\lx -> case lx of LxName _ -> True; _ -> False)
-name = (Name . lxName) <$> matchNextLexem (\lx -> case lx of LxName _ -> True; _ -> False)
+string = (ConstString . lxName) <$> matchNextLexem (\lx -> case lx of LxName _ -> True; _ -> False)
+name = (Name . lxName) <$> matchNextLexem (\lx -> 
+        case lx of LxName s | s `notElem` keywords -> True
+                            | otherwise            -> False
+                   _                               -> False)
 constInt = (ConstInt . lxNumber) <$> matchNextLexem (\lx -> case lx of LxNumber _ -> True; _ -> False)
 keyword expected = matchNextLexem (\lx -> case lx of LxName s | s == expected   -> True 
                                                               | otherwise       -> False
                                                      _                          -> False)
 compOp =     (const Eq `liftM` (operator "==")) 
       <|> (const NotEq `liftM` (operator "/="))
-      <|> (const Gr `liftM` (operator ">"))
+      <|> (const Gr `liftM` (operator ">")) 
       <|> (const GrEq `liftM` (operator ">="))
       <|> (const Less `liftM` (operator "<"))
       <|> (const LessEq `liftM` (operator "<="))
@@ -213,7 +224,6 @@ indent = matchNextLexem ((==) Indent)
 dedent = matchNextLexem ((==) Dedent)
 parenthesisOpen = matchNextLexem ((==) ParenthesisOpen)
 parenthesisClose = matchNextLexem ((==) ParenthesisClose)
-singleEq = matchNextLexem ((==) (Op "="))
 doubleEq = matchNextLexem ((==) (Op "=="))
 haskellNotEq = matchNextLexem ((==) (Op "/="))
 operator op = matchNextLexem ((==) (Op  op))
@@ -237,4 +247,8 @@ main :: IO ()
 main = do
     cont <- join $ hGetContents `liftM` openFile "input.ysm" ReadMode
     -- mapM_ print $ runLexer cont
-    print $ runParser $ runLexer cont
+    let lex = runLexer cont
+    let res = runParser $ lex
+    putStrLn $ Pr.ppShow $ lex
+    let txt = Pr.ppShow $ res :: String
+    putStrLn txt

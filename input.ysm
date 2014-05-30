@@ -1,2 +1,8 @@
-a = 1
-sum a b = a + b
+sum a b = 
+    a + b
+
+inc = sum 1
+
+a = if (5 > 6) then 1 else 0
+map f l = if List.isEmpty l then List.empty else List.head l :: List.tail l
+

@@ -2,6 +2,7 @@ module Main where
 
 import Lexer
 import Parser
+import Interpreter
 import Control.Monad
 import Data.Functor
 import Data.Maybe
