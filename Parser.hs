@@ -75,11 +75,7 @@ parse acc = Module `liftM` manyOrNone binding
 
 
 binding = (newline >> binding) <|> tupleBinding <|> funcBinding
-tupleBinding = do
-    ids <- name `separatedBy` comma
-    operator "="
-    cont <- suite
-    return $ TupleBinding (ids) cont
+tupleBinding = TupleBinding <$> (name `separatedBy` comma) <*> (operator "=" >> suite)
 
 --funcBinding = name >> varargslist >> operator "=" >> suite
 funcBinding = FuncBinding <$> name <*> (varargslist `followedBy` operator "=") <*> suite
@@ -94,10 +90,13 @@ compoundExprStmt =  CompoundExprStmt
                 <$> exprStmt `separatedBy` semicolon 
                 `followedBy` oneOrNone semicolon 
                 `followedBy` newline
-exprStmt = ExprStmt <$> testlist  <*> oneOrNone (arrowLeft >> exprStmt)
+exprStmt = assignStmt <|> testlist
+assignStmt = AssignStmt <$> testlist  <*> (arrowLeft >> assignStmt)
 testlist = Testlist <$> (test `separatedBy` comma)
 
-test = lambdef <|> ifExpr <|> cons
+test = lambdef 
+     <|> ifExpr 
+     <|> cons
 lambdef = Lambdef <$> (backslash >> varargslist `followedBy` arrowRight) <*> suite
 ifExpr = do 
     keyword "if"
@@ -177,7 +176,7 @@ operator op = matchNextLexem ((==) (Op  op))
 singlePipe = matchNextLexem ((==) (Op "|"))
 
 binaryOp expr op ctor = 
-    (\l -> if length l == 1 then head l else ctor l) <$> (expr `separatedBy` op)
+    (\l -> if length l == 1 then head l else ctor l) `liftM` (expr `separatedBy` op)
     
 
 samePriorBinaryOp expr opParser ctor = do 

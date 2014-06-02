@@ -68,10 +68,9 @@ basicBinaryOperation op (Value t (ValueInt l)) (Value _ (ValueInt r)) =
 
 findVariable :: String -> InterpreterState (Maybe Value)
 findVariable nm = do
-    stc <- isStack <$> get
-    case find (\frame -> nm `M.member` sfVars frame) stc of 
-        Just fr -> return $ nm `M.lookup` (sfVars fr)
-        Nothing -> return Nothing
+    frame <- (head . isStack) <$> get
+    return $ nm `M.lookup` (sfVars frame)
+    
 
 addLocalVar :: String -> Value -> InterpreterState ()
 addLocalVar nm val = 
@@ -80,19 +79,25 @@ addLocalVar nm val =
                 hd' = StackFrame $ M.insert nm val hd
             in st { isStack = hd' : (isStack st)}
     in modify helper
+
 evalFunction :: Value -> InterpreterState Value
 evalFunction fn@(Value t (ValueFunc ast applied ) ) 
     | (length $ astFuncArgs ast) == length applied = do
         pushFrame (astFuncArgs ast) (reverse applied)
-        res <- eval ast
+        case ast of { FuncBinding (Name nm) _ _ | nm == "inc" -> error $ "here" ++ show ast; _ -> return (); }
+        res <- eval (astCodeBody ast)
         popFrame >> return res
+        
     | otherwise = return fn
+evalFunction x = error $ show x
 
-evalTrailer [] v = return $ v
-evalTrailer (Callarg arg : xs) (Value t (ValueFunc ast [] )) = do
+
+evalTrailer [] fn@(Value _ (ValueFunc _ _ )) = evalFunction fn
+evalTrailer (Callarg arg : xs ) (Value t (ValueFunc ast applied )) = do
     a <- eval arg
-    evalFunction (Value t (ValueFunc ast [a] ))
+    evalTrailer xs (Value t (ValueFunc ast (a : applied) ))
 evalTrailer (Scope (Name nm) : xs) v = undefined
+evalTrailer [] v = return v
 
 evalPower :: Maybe AST -> Value -> InterpreterState Value
 evalPower Nothing  v    = return v
@@ -113,7 +118,16 @@ eval (Name nm)          = do
 eval ast@(FuncBinding (Name nm) (Varargslist args) _) = do
     addLocalVar nm (Value funcType (ValueFunc ast []) )
     return $ valueVoid
-eval (Module m)         = mapM_ (eval) m >> return valueVoid
+
+eval (Testlist l)           = do  
+    res <- mapM (eval) l
+    return $ if length res > 1 then valueTuple res else head res
+eval (CompoundExprStmt s) = do
+    st <- get
+    error $ "here" ++ show st
+    mapM_ (eval) (init s) >> eval (last s)
+eval (Suite s)            = mapM_ (eval) (init s) >> eval (last s)
+eval (Module m)           = mapM_ (eval) m >> return valueVoid
 eval _ = mzero
 
 runMainModule m@(Module mod) = do 
@@ -136,5 +150,7 @@ main = do
     -- mapM_ print $ runLexer cont
     let lex = runLexer cont
     putStrLn $ Pr.ppShow $ lex
-    let txt = Pr.ppShow $ runParser $ lex 
-    putStrLn txt
+    let ast = runParser $ lex 
+    putStrLn $ Pr.ppShow $ ast
+    let res = runInterpreter ast
+    putStrLn $ Pr.ppShow $ res

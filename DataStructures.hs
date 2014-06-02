@@ -3,6 +3,7 @@ module DataStructures where
 
 data CompOp = Eq | NotEq | LessEq | GrEq | Less | Gr deriving (Show, Eq)
 
+keywords :: [String]
 keywords = ["if", "then", "else", "while", "do", "for", "in"]
 
 data AST = Module [AST]
@@ -13,7 +14,7 @@ data AST = Module [AST]
            | Suite [AST]
            | IndentedSuite [AST] [AST]
            | CompoundExprStmt [AST]
-           | ExprStmt AST (Maybe AST)
+           | AssignStmt AST AST
            | IfExpr AST AST (Maybe AST)
            | Test AST
            | Testlist [AST]
@@ -39,11 +40,17 @@ data AST = Module [AST]
            | ConstString String
             deriving (Show, Eq)
 
+astName :: AST -> String
 astName (Name s) = s
 astName _        = error "error"    
 
+astFuncArgs :: AST -> [AST]
 astFuncArgs (FuncBinding _ (Varargslist xs) _) = xs
 astFuncArgs (Lambdef (Varargslist xs) _)       = xs
+
+astCodeBody :: AST -> AST
+astCodeBody (FuncBinding _ _ x) = x
+astCodeBody (Lambdef _  x)      = x
 
 type AppliedArgs = [Value]
 data Instance = ValueInt Int
@@ -67,7 +74,11 @@ data Value = Value {
     vInst :: Instance
 } deriving (Show, Eq)
 
-
+valInt :: Instance -> Int
 valInt    (ValueInt x)    = x
+
+valDouble :: Instance -> Double
 valDouble (ValueDouble x) = x
+
+valString :: Instance -> String
 valString (ValueString x) = x
