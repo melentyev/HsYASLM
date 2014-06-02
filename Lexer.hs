@@ -5,6 +5,7 @@ module Lexer (LexemType(..),
               lxOp,  
               runLexer) where
 
+import DataStructures
 import Data.Char
 import Data.List
 import Data.Maybe
@@ -96,7 +97,7 @@ isKnownSymbol :: Char -> Bool
 isKnownSymbol = flip elem "<>=+-*/%$^|&!./|\\:"
 
 isNameSymbol :: Char -> Bool 
-isNameSymbol = liftA2 (||) isAlphaNum (=='_')
+isNameSymbol = (||) <$> isAlphaNum <*> (=='_')
 
 parseLine :: LexerState ()
 parseLine = do

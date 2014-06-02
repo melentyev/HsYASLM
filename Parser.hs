@@ -4,7 +4,7 @@ module Parser (AST(..), runParser, CompOp, keywords) where
     -fwarn-monomorphism-restriction -fwarn-hi-shadowing
     -fno-warn-unused-binds -fno-warn-unused-matches
 #-}
-
+import DataStructures
 import Lexer
 import Data.Char
 import Data.List
@@ -15,45 +15,6 @@ import Control.Monad
 import Control.Monad.Loops
 import Control.Applicative ( (<*>), (<$>) )
 import qualified Text.Show.Pretty as Pr
-
-data CompOp = Eq | NotEq | LessEq | GrEq | Less | Gr deriving (Show)
-
-keywords = ["if", "then", "else", "while", "do", "for", "in"]
-
-data AST = Module [AST]
-           | Binding AST
-           | TupleBinding [AST] AST
-           | FuncBinding AST AST AST
-           | Varargslist [AST]
-           | Arg [AST]
-           | Suite [AST]
-           | IndentedSuite [AST] [AST]
-           | CompoundExprStmt [AST]
-           | ExprStmt AST (Maybe AST)
-           | IfExpr AST AST (Maybe AST)
-           | Test AST
-           | Testlist [AST]
-           | Cons AST AST
-           | OrTest [AST]
-           | AndTest [AST]
-           | NotTest AST
-           | Comparison AST CompOp AST
-           | BtwOrExpr [AST]
-           | XorExpr [AST]
-           | AndExpr [AST]
-           | ShiftExpr AST String AST
-           | ArithExpr AST String AST
-           | Term AST String AST
-           | Factor String AST
-           | Power AST [AST] (Maybe AST)
-           | Lambdef AST AST -- varargslist '->' suite
-           | Callarg AST
-           | Name String
-           | Scope AST
-           | ConstInt Int
-           | ConstFloat Double
-           | ConstString String
-            deriving (Show)
 
 
 data ParserStateData = ParserStateData { 
@@ -140,14 +101,10 @@ test = lambdef <|> ifExpr <|> cons
 lambdef = Lambdef <$> (backslash >> varargslist `followedBy` arrowRight) <*> suite
 ifExpr = do 
     keyword "if"
-
-
     cond <- test
-
     keyword "then"
     th <- exprStmt <|> suite 
     keyword "else"
-
     el <- oneOrNone (exprStmt <|> suite)
     return $ IfExpr cond th el
 cons = (\l r -> maybe l (Cons l) r ) <$> orTest <*> oneOrNone (operator "::" >> cons) 
@@ -164,18 +121,8 @@ arithExpr   = samePriorBinaryOp term termDelim ArithExpr
 term        = samePriorBinaryOp factor factorDelim Term 
     
 factor = prefixedFactor <|> power
-{-prefixedFactor = do 
-    op <- factorPrefixOp 
-    val <- factor
-    return $ Factor op val-}
 prefixedFactor = Factor <$> factorPrefixOp <*> factor
 power = Power <$> atom <*> manyOrNone trailer <*> oneOrNone (operator "**" >> factor)
-{-power = do 
-    a <- atom 
-    tr <- manyOrNone trailer 
-    pow <- oneOrNone (operator "**" >> factor)
-    --error "here"
-    return $ Power a tr pow --}
 trailer = (Scope <$> (operator "." >> name) ) <|> callarg
 callarg = Callarg <$> atom
 atom    =  testlist `wrappedBy` (parenthesisOpen, parenthesisClose) 
@@ -230,7 +177,7 @@ operator op = matchNextLexem ((==) (Op  op))
 singlePipe = matchNextLexem ((==) (Op "|"))
 
 binaryOp expr op ctor = 
-    (\l -> if length l == 1 then head l else ctor l) `liftM` (expr `separatedBy` op)
+    (\l -> if length l == 1 then head l else ctor l) <$> (expr `separatedBy` op)
     
 
 samePriorBinaryOp expr opParser ctor = do 
